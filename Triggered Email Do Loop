@@ -1,0 +1,40 @@
+Public PTemp, Batt_volt
+Public forcetalk ' says if channel is open
+Public ServerResp As String
+Public email As String
+
+
+'Define Data Tables.
+DataTable (Test,1,-1) 'Set table size to # of records, or -1 to autoallocate.
+	DataInterval (0,15,Sec,10)
+	Minimum (1,Batt_volt,FP2,False,False)
+	Sample (1,PTemp,FP2)
+	Sample (1,forcetalk,FP2)
+EndTable
+
+'Define Subroutines
+'Sub
+	'EnterSub instructions here
+'EndSub
+
+'Main Program
+
+BeginProg 'blinks a light every second
+	Scan (1,Sec,0,0)
+		PanelTemp (PTemp,60)
+		Battery (Batt_volt)
+		VoltDiff (forcetalk,1,mV2500,3,True ,0,60,1.0,0) 'DIFF Channel 3
+		CallTable Test
+	NextScan
+
+  SlowSequence
+  Do
+    If forcetalk < 1 AND forcetalk > -1 Then 
+   'if port is closed returns -1, else returns 0
+       email = EmailRelay ("email@domin","Test Email","Hello, Dave.",ServerResp)
+    EndIf 
+  Loop
+
+  EndSequence 
+
+  EndProg
