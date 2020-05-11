@@ -1,0 +1,176 @@
+'CR300 Series
+'Created by Ian Higgins
+
+'Declare Variables and Units
+
+
+'set water level offset
+Public WL_Offset = 736.64
+
+'set warn level - see line 112
+Public Warn_LVL = 743.28
+
+' communication line 123 set time between 0 and 10 minutes on a 60 min interval
+' email communication possible within 3 minutes of event
+
+
+Public BattV
+Public PTemp_C
+Public Rain_in
+Public CS450(2)
+Public Air_Temp
+Public LastWL_String As String * 100
+Public Split_Result(3)
+Public email_timer
+Public Lvl_offset
+Public BP_mbar
+
+
+
+Public ServerResp As String * 100
+Public email_high As String
+Public Alarm As Boolean
+Public Cold_Warn As Boolean
+Public com_test As Boolean 
+Public server_status As String
+
+
+
+Alias CS450(1)=Lvl_ft
+Alias CS450(2)=Temp_C
+
+Units BattV=Volts
+Units PTemp_C=Deg C
+Units Rain_in=inch
+Units Air_Temp=Deg C
+Units Lvl_ft=feet
+Units Lvl_offset=feet
+Units Temp_C=deg 
+Units BP_mbar=mbar
+
+'Define Data Tables
+
+'Water Level
+DataTable(Table1,True,-1)
+	DataInterval(0,15,Min,10)
+	Minimum(1,BattV,FP2,False,False)
+	Sample(1,Lvl_ft,FP2)
+	Sample(1,Lvl_offset,FP2)
+EndTable
+
+
+
+'15 minute rain
+DataTable(Table15,True,-1)
+	DataInterval(0,15,Min,10)
+	Totalize(1,Rain_in,FP2,False)
+	Sample(1,Air_Temp,FP2,False)
+	Sample(1,Cold_Warn,Boolean,False)
+	Sample (1,BattV,FP2,False)
+	Sample(1,BP_mbar,IEEE4)
+EndTable
+
+'Daily rain
+DataTable(Daily,True,-1)
+	DataInterval(0,1440,Min,10)
+	Minimum(1,BattV,FP2,False,False)
+	Maximum (1,BattV,FP2,False,1)
+	Average (1,BattV,FP2,False)
+	Totalize(1,Rain_in,FP2,False)
+EndTable
+
+'rain tips
+DataTable(TIPS,Rain_in<>0,6000)
+	Totalize(1,Rain_in,FP2,False)
+EndTable
+
+DataTable(BARO,True,-1)
+	DataInterval(0,15,Min,10)
+	Sample(1,BP_mbar,IEEE4)
+EndTable
+
+
+'Main Program
+BeginProg
+	' Atmospheric Sequence
+	Scan(30,Sec,1,0)
+		'CS700 Rain Gauge measurement 'Rain_in'
+		PulseCount(Rain_in,1,P_SW,2,0,0.01,0)
+
+' different thermosters 
+		'Therm107(Air_Temp,1,1,VX1,0,60,1,0)
+'Therm108 (Air_Temp,1,1,Vx1,0,60,1.0,0)
+Therm109 (Air_Temp,1,1,Vx1,0,60,1.0,0)
+
+If Air_Temp < 0.01 Then
+   Cold_Warn = True
+ Else 
+   Cold_Warn = False
+   EndIf
+   
+'CS100 Barometric Pressure Sensor measurement 'BP_mbar'
+PortSet(C2,1)
+VoltSe(BP_mbar,1,mV2500,2,True,0,60,0.2,600)
+PortSet(C2,0)
+   
+CallTable Daily
+CallTable TIPS
+CallTable Table15
+CallTable BARO		
+NextScan
+
+'Water Level Sequence
+SlowSequence
+  Scan (1,Min,0,0) 'I think both slowsequences have to have the same scan interval
+    Battery (BattV)
+	SDI12Recorder(Lvl_ft,C1,"0","M1!",1,0,-1)
+		Lvl_ft=(Lvl_ft*2.30666)
+		Lvl_offset=Lvl_ft+WL_Offset
+		'Call Data Tables and Store Data
+		' only need to call once for whole program?
+
+CallTable Table1
+  NextScan
+  EndSequence
+  
+SlowSequence
+Scan (1,Min,0,0)
+  'looks at two records back to account for any lag time with logger
+	GetRecord (LastWL_String,Table1,2)
+  SplitStr (Split_Result(),LastWL_String,",",3,4)
+
+  
+ 
+ If Lvl_offset > Split_Result(3) AND Lvl_offset > Warn_LVL AND Split_Result(3)< Warn_LVL Then
+ Alarm = True
+  Else
+Alarm = False
+  EndIf
+ 
+If TimeIsBetween(0,10,60,min) OR Alarm = True Then
+    If BattV <12.0 Then
+      com_test = False
+      SetSetting ("CellEnabled",False)
+    Else
+      com_test = True
+      SetSetting ("CellEnabled",True)
+    EndIf
+  Else 
+    com_test = False
+    SetSetting ("CellEnabled",False)
+  EndIf
+  
+If Alarm = True AND email_high <> -1 Then
+email_high = EmailRelay ("ihiggins@kingcounty.gov,Brendan.Grant@kingcounty.gov,Scott.Miller@kingcounty.gov,Wendy.Kara@kingcounty.gov","North Bend Stormwater Pond Water Level Warning","Current Water Level: "& Lvl_offset,ServerResp)
+Else
+		EndIf
+		
+If Split_Result(3) > Warn_LVL AND Lvl_offset < Warn_LVL Then
+email_high = 0
+Else
+  EndIf
+	
+NextScan
+  EndSequence
+EndProg
+       
